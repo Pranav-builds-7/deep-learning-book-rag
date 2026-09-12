@@ -351,7 +351,7 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
     st.markdown(
-        '<p class="creator">RAG chatbot made by Krishna</p>',
+        '<p class="creator">RAG chatbot made by Pranav</p>',
         unsafe_allow_html=True,
     )
 
