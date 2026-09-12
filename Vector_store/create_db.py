@@ -30,7 +30,7 @@ embedding_model = HuggingFaceEmbeddings(
 vectorstore = Chroma.from_documents(
     documents=chunks,
     embedding=embedding_model,
-    persist_directory="chroma_db"
+    persist_directory="chroma_dbNew"
 )
 
 print("Database created successfully!")

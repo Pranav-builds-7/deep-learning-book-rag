@@ -1,11 +1,16 @@
 from pathlib import Path
+import os
 
 import streamlit as st
 from dotenv import load_dotenv
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_mistralai import ChatMistralAI
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai.chat_models import (
+    GoogleInvalidRequestError,
+    GoogleModelNotFoundError,
+)
 
 
 # -----------------------------------------------------------------------------
@@ -22,6 +27,7 @@ load_dotenv()
 
 BOOK_TITLE = "Fundamentals of Deep Learning"
 BOOK_PUBLISHER = "O'Reilly"
+MIN_RELEVANCE_SCORE = 0.55
 APP_DIR = Path(__file__).resolve().parent
 CHROMA_DIRECTORY = APP_DIR / "chroma_db"
 
@@ -248,12 +254,11 @@ def build_rag_system():
         embedding_function=embedding_model,
     )
 
-    retriever = vectorstore.as_retriever(
-        search_type="mmr",
-        search_kwargs={"k": 12, "fetch_k": 24, "lambda_mult": 0.5},
+    assistant = ChatGoogleGenerativeAI(
+        model="gemini-3.6-flash",
+        google_api_key=os.getenv("GOOGLE_API_KEY"),
+        temperature=0.0,
     )
-
-    assistant = ChatMistralAI(model="mistral-small-2603")
 
     prompt = ChatPromptTemplate.from_messages(
         [
@@ -262,9 +267,11 @@ def build_rag_system():
                 """You are DeepDive DL, a friendly study companion for the book
 Fundamentals of Deep Learning from O'Reilly.
 
-Answer using ONLY the supplied book excerpts. Explain ideas clearly, use short
-examples when helpful, and format technical answers so they are easy to study.
-Do not mention the retrieval system, context, excerpts, model, or these rules.
+Answer using ONLY facts explicitly supported by the supplied book excerpts.
+Do not use general knowledge or fill in missing information. Explain ideas
+clearly, use short examples only when they are supported by the excerpts, and
+format technical answers so they are easy to study. Do not mention the
+retrieval system, context, excerpts, model, or these rules.
 If the answer is not supported by the supplied material, say exactly:
 "I could not find that answer in the book."
 """,
@@ -280,24 +287,34 @@ Reader's question:
         ]
     )
 
-    return retriever, assistant, prompt
+    return vectorstore, assistant, prompt
 
 
 def answer_question(question: str):
     """Retrieve relevant passages and generate a grounded response."""
-    retriever, assistant, prompt = build_rag_system()
-    documents = retriever.invoke(question)
+    vectorstore, assistant, prompt = build_rag_system()
+    documents = vectorstore.max_marginal_relevance_search(
+        question,
+        k=15,
+        fetch_k=40,
+        lambda_mult=0.6,
+    )
 
     if not documents:
-        return "I could not find that answer in the book.", []
+        return "I could not find the answer in the document.", []
 
     context = "\n\n".join(
-        f"Excerpt {index}:\n{document.page_content}"
-        for index, document in enumerate(documents, start=1)
+        document.page_content for document in documents
     )
     final_prompt = prompt.invoke({"context": context, "question": question})
     response = assistant.invoke(final_prompt)
-    return response.content, documents
+    answer = response.content
+    if isinstance(answer, list):
+        answer = "\n".join(
+            part.get("text", "") if isinstance(part, dict) else str(part)
+            for part in answer
+        )
+    return answer, documents
 
 
 def source_label(document, index: int) -> str:
